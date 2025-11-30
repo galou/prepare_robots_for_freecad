@@ -1,0 +1,68 @@
+
+# Longer, detailed macro description
+
+__Name__ = ''
+__Comment__ = ''
+__Author__ = ''
+__Version__ = ''
+__Date__ = 'YYYY-MM-DD'
+__License__ = 'LGPL-2.0-or-later'
+__Web__ = 'http://forum.freecadweb.org/viewtopic.php?f=?&t=????'
+__Wiki__ = 'http://www.freecadweb.org/wiki/Macro_Title_Of_macro'
+__Icon__ = ''
+__Help__ = ''
+__Status__ = ''
+__Requires__ = 'FreeCAD ?.??'
+__Communication__ = 'https://github.com/FreeCAD/FreeCAD-macros/issues/'
+__Files__ = ''
+
+import tempfile
+import os
+import requests
+import shutil
+import zipfile
+import tarfile
+
+def unpack_archive(filepath, extract_dir):
+    # Try ZIP
+    if zipfile.is_zipfile(filepath):
+        with zipfile.ZipFile(filepath, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+        print("Unpacked ZIP archive.")
+        return True
+    # Try TAR
+    elif tarfile.is_tarfile(filepath):
+        with tarfile.open(filepath, 'r:*') as tar_ref:
+            tar_ref.extractall(extract_dir)
+        print("Unpacked TAR archive.")
+        return True
+    else:
+        print("Unknown archive format or not an archive.")
+        return False
+
+def main():
+    # Step 1: Create a temporary directory
+    temp_dir = tempfile.mkdtemp()
+    print("Temporary directory created:", temp_dir)
+
+    # Step 2: Download the file
+    url = "https://www.yaskawa.eu.com/_downloads/download_d3360"
+    local_filename = os.path.join(temp_dir, "downloaded_file")
+    try:
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(local_filename, 'wb') as f:
+                shutil.copyfileobj(r.raw, f)
+        print("Downloaded file:", local_filename)
+    except Exception as e:
+        print("Download failed:", e)
+        return
+
+    # Step 3: Detect archive type and unpack
+    if unpack_archive(local_filename, temp_dir):
+        print("Files unpacked to:", temp_dir)
+    else:
+        print("No files unpacked. Check the downloaded file format.")
+
+if __name__ == "__main__":
+    main()
