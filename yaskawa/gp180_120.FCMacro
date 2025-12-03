@@ -16,53 +16,312 @@ __Requires__ = 'FreeCAD ?.??'
 __Communication__ = 'https://github.com/FreeCAD/FreeCAD-macros/issues/'
 __Files__ = ''
 
-import tempfile
+import csv
+from dataclasses import dataclass
+import gzip
 import os
-import requests
+import re
 import shutil
+import tempfile
 import zipfile
-import tarfile
+from contextlib import suppress
+from pathlib import Path
 
-def unpack_archive(filepath, extract_dir):
-    # Try ZIP
-    if zipfile.is_zipfile(filepath):
-        with zipfile.ZipFile(filepath, 'r') as zip_ref:
-            zip_ref.extractall(extract_dir)
-        print("Unpacked ZIP archive.")
-        return True
-    # Try TAR
-    elif tarfile.is_tarfile(filepath):
-        with tarfile.open(filepath, 'r:*') as tar_ref:
-            tar_ref.extractall(extract_dir)
-        print("Unpacked TAR archive.")
-        return True
-    else:
-        print("Unknown archive format or not an archive.")
-        return False
+import FreeCAD as app
+import FreeCADGui as gui
+import requests
 
-def main():
-    # Step 1: Create a temporary directory
-    temp_dir = tempfile.mkdtemp()
-    print("Temporary directory created:", temp_dir)
 
-    # Step 2: Download the file
-    url = "https://www.yaskawa.eu.com/_downloads/download_d3360"
-    local_filename = os.path.join(temp_dir, "downloaded_file")
+@dataclass
+class DHFrame:
+    """A Denavit-Hartenberg frame.
+
+    Only prismatic joints are supported.
+    """
+    # Translation along the original z axis, in millimeters.
+    d: float
+
+    # Rotation about the original z axis, in degrees.
+    # The actuation of the joint will be added to this parameter.
+    theta: float
+
+    # Translation along the new x axis (sometimes called `a`), in millimeters.
+    r: float
+
+    # Rotation about the new x axis, in degrees.
+    alpha: float
+
+    # Mechanical joint parameters, in ° and °/s.
+    min_angle: float
+    max_angle: float
+    velocity: float
+
+
+@dataclass
+class Robot:
+    """A robot defined by Denavit-Hartenberg parameters."""
+    frames: list[DHFrame]
+
+
+def extract_single_file_zip(
+        archive_path: Path,
+        member_path: str,
+        dest_path: Path,
+) -> None:
+    """Extract a single file from a ZIP archive.
+
+    Args:
+        archive_path (Path): Path to the ZIP archive.
+        member_path (str): Path of the file inside the archive to extract.
+        dest_path (Path): Destination file.
+    """
+    if not zipfile.is_zipfile(archive_path):
+        raise ValueError(f'"{archive_path}" is not a valid ZIP file.')
+    with zipfile.ZipFile(archive_path, "r") as zip_f:
+        if member_path not in zip_f.namelist():
+            raise ValueError(f'"{member_path}" not found in "{archive_path}".')
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        zip_f.extract(member_path, dest_path.parent)
+        extracted_file = dest_path.parent / Path(member_path)
+        extracted_file.rename(dest_path)
+
+
+def extract_single_file(
+        archive_path: Path,
+        member_path: str,
+        dest_path: Path,
+        ) -> None:
+    """Extract a single file from an archive (ZIP or TAR).
+
+    Args:
+        archive_path (Path): Path to the ZIP archive.
+        member_path (str): Path of the file inside the archive to extract.
+        dest_path (Path): Destination file.
+    """
+    with suppress(ValueError):
+        extract_single_file_zip(archive_path, member_path, dest_path)
+        return
+    raise ValueError(f'No known method to extract "{member_path}" from "{archive_path}".')
+
+
+def download_file(url: str, local_path: Path) -> bool:
+    """Download a file from a URL to a local path."""
     try:
         with requests.get(url, stream=True) as r:
             r.raise_for_status()
-            with open(local_filename, 'wb') as f:
+            with open(local_path, 'wb') as f:
                 shutil.copyfileobj(r.raw, f)
-        print("Downloaded file:", local_filename)
+        app.Console.PrintMessage(f"Downloaded file to: {local_path}\n")
+        return True
     except Exception as e:
-        print("Download failed:", e)
+        app.Console.PrintError(f"Download failed: {e}\n")
+        return False
+
+
+def save_wrl(obj: app.DocumentObject, file_path: Path) -> None:
+    """Save a FreeCAD object to a VRML file (clear text)."""
+    # Even if the extension is `wrl`, FreeCAD exports in `wrz` format (compressed).
+    # So first export to `wrz`, then uncompress to `wrl`.
+    wrz_path = file_path.with_suffix('.wrz')
+    app.Console.PrintMessage(f'Saving WRZ file to: "{file_path}"\n')
+    gui.export([obj], str(wrz_path))
+
+    # Uncmpress WRZ (gzipped) to WRL (clear text).
+    with gzip.open(wrz_path, "r") as f_in:
+        with file_path.open("wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+
+
+def save_obj_as_wrl(
+        doc: app.Document,
+        label: str,
+        placement: app.Placement,
+        directory: Path,
+        ) -> Path:
+    """Export a FreeCAD object with the given label to a WRL file."""
+    obj = doc.getObjectsByLabel(label)[0]
+    obj.Placement = placement
+    base_wrl = directory / f"{label.lower()}.wrl"
+    save_wrl(obj, base_wrl)
+    return base_wrl
+
+
+def create_wrl(doc: app.Document, file_path: Path) -> None:
+    """Export the robot model to a WRL file."""
+    def includewrl(file_path: Path, axis: int, indent: str = "") -> (str, str):
+        before = ""
+        after = ""
+        before += f"{indent}# {file_path.name}\n"
+        before += f"{indent}DEF FREECAD_AXIS{axis} Transform {{\n"
+        indent += "  "  # A copy.
+        before += f"{indent}children [\n"
+        indent += "  "
+        # Replace the `DEF o?+` definition with `DEF {file_path.stem}_o...`
+        # to avoid name clashes (also change `USE o?+`).
+        regex_def = re.compile(r"DEF\s+o([0-9]+)")
+        regex_use = re.compile(r"USE\s+o([0-9]+)")
+        with file_path.open("r") as f:
+            for line in f:
+                line = regex_def.sub(f"DEF {file_path.stem}_o\\1", line)
+                line = regex_use.sub(f"USE {file_path.stem}_o\\1", line)
+                before += indent + line + "\n"
+        indent = indent[:-2]
+        after += f"{indent}]\n"  # Close children.
+        indent = indent[:-2]
+        after += f"{indent}}} # {file_path.name}\n"  # Close Transform.
+        return before, after
+
+    directory = file_path.parent
+    base_wrl = save_obj_as_wrl(
+            doc,
+            "BASE_AXIS",
+            # app.Placement(
+            #     app.Vector(0, 0, 0),
+            #     app.Rotation(app.Vector(1, 0, 0), -90) * app.Rotation(app.Vector(0, 0, 1), 180),
+            # ),
+            app.Placement(),
+            directory,
+    )
+
+    s_wrl = save_obj_as_wrl(
+            doc,
+            "S_AXIS",
+            app.Placement(),
+            directory,
+    )
+
+    l_wrl = save_obj_as_wrl(
+            doc,
+            "L_AXIS",
+            app.Placement(),
+            directory,
+    )
+
+    u_wrl = save_obj_as_wrl(
+            doc,
+            "U_AXIS",
+            app.Placement(),
+            directory,
+    )
+
+    r_wrl = save_obj_as_wrl(
+            doc,
+            "R_AXIS",
+            app.Placement(),
+            directory,
+    )
+
+    b_wrl = save_obj_as_wrl(
+            doc,
+            "B_AXIS",
+            app.Placement(),
+            directory,
+    )
+
+    t_wrl = save_obj_as_wrl(
+            doc,
+            "T_AXIS",
+            app.Placement(),
+            directory,
+    )
+
+    files = [s_wrl, l_wrl, u_wrl, r_wrl, b_wrl, t_wrl]
+    before_parts = []
+    after_parts = []
+    indent = "    "
+    for i in range(len(files)):
+        before, after = includewrl(files[i], axis=i + 1, indent=indent)
+        before_parts.append(before)
+        after_parts.append(after)
+        indent += "  "
+
+    output_wrl_path = directory / "gp180-120.wrl"
+    with output_wrl_path.open("w") as f:
+        f.write("#VRML V2.0 utf8\n")
+        f.write("DEF GP180_120 Group {\n")
+        f.write("  children [\n")
+        with base_wrl.open("r") as base_f:
+            for line in base_f:
+                f.write("    " + line)
+        for before in before_parts:
+            f.write(before)
+        for after in reversed(after_parts):
+            f.write(after)
+        f.write("  ]\n")
+        f.write("}\n")
+
+
+def create_csv(file_path: Path) -> None:
+    lengths = [650.0, 325.0, 1150.0, 300.0, 1590.0,  225.0]
+    # d =     ([lengths[0],          0,          0, -lengths[4],       0, -lengths[5]]),
+    # theta = ([         0,    -M_PI_2,          0,           0,       0,           0]),
+    # r =     ([lengths[1], lengths[2], lengths[3],           0,       0,           0]),
+    # alpha = ([   -M_PI_2,       M_PI,    -M_PI_2,      M_PI_2, -M_PI_2,        M_PI]),
+    kinematics = Robot([
+        DHFrame(d=lengths[0],  theta=0.0,   r=lengths[1], alpha=-90.0, min_angle=-180.0, max_angle=180.0, velocity=125.0),
+        DHFrame(d=0.0,         theta=-90.0, r=lengths[2], alpha=180.0, min_angle=-60.0,  max_angle=76.0,  velocity=115.0),
+        DHFrame(d=0.0,         theta=0.0,   r=lengths[3], alpha=-90.0, min_angle=-86.0,  max_angle=90.0,  velocity=125.0),
+        DHFrame(d=-lengths[4], theta=0.0,   r=0.0,        alpha=90.0,  min_angle=-360.0, max_angle=360.0, velocity=182.0),
+        DHFrame(d=0.0,         theta=0.0,   r=0.0,        alpha=-90.0, min_angle=-130.0, max_angle=130.0, velocity=175.0),
+        DHFrame(d=-lengths[5], theta=0.0,   r=0.0,        alpha=180.0, min_angle=-360.0, max_angle=360.0, velocity=265.0),
+    ])
+
+    # CSV header: "a, alpha, d, theta, rotDir, maxAngle, minAngle, AxisVelocity"
+    with file_path.open("w", newline='') as csvfile:
+        csv_writer = csv.writer(csvfile)
+        csv_writer.writerow(["a", "alpha", "d", "theta", "rotDir", "maxAngle", "minAngle", "AxisVelocity"])
+        for frame in kinematics.frames:
+            csv_writer.writerow([
+                f"{frame.r}",
+                f"{frame.alpha}",
+                f"{frame.d}",
+                f"{frame.theta}",
+                "1.0",
+                f"{frame.max_angle}",
+                f"{frame.min_angle}",
+                f"{frame.velocity}",
+            ])
+
+
+def main():
+    temp_dir = Path(tempfile.mkdtemp())
+
+    url = "https://www.yaskawa.eu.com/_downloads/download_d3360"
+    local_filename = os.path.join(temp_dir, "downloaded_file.zip")
+    if not download_file(url, Path(local_filename)):
         return
 
-    # Step 3: Detect archive type and unpack
-    if unpack_archive(local_filename, temp_dir):
-        print("Files unpacked to:", temp_dir)
-    else:
-        print("No files unpacked. Check the downloaded file format.")
+    # Only extract the STEP file
+    step_member_path = "GP180_120_3D/gp180-120.stp"
+    dest_step_path = temp_dir / "gp180-120.stp"
+    try:
+        extract_single_file(local_filename, step_member_path, dest_step_path)
+    except ValueError as e:
+        app.Console.PrintError(f"Extraction failed: {e}\n")
+        return
+
+    # doc = app.newDocument("GP180_120", temp=True)
+    doc = app.newDocument("GP180_120")
+
+    app.Console.PrintMessage('Opening STEP file: "{dest_step_path}"\n')
+    import ImportGui  # noqa: F401
+    from freecad import module_io
+    module_io.OpenInsertObject("ImportGui", str(dest_step_path), "insert", doc.Name)
+    # ImportGui.insert(str(dest_step_path))
+    doc.recompute()
+
+    # Adjust orientation to have Z up, TCP at X+,Y0 at home position.
+    robot_obj = doc.getObjectsByLabel("gp180-120")[0]
+    robot_obj.Placement.Rotation = app.Rotation(app.Vector(1, 0, 0), -90) * app.Rotation(app.Vector(0, 0, 1), 180)
+    doc.recompute()
+
+    # Write the Kinematics file.
+    output_csv_path = temp_dir / "gp180-120_kinematics.csv"
+    create_csv(output_csv_path)
+
+    output_wrl_path = temp_dir / "gp180-120.wrl"
+    create_wrl(doc, output_wrl_path)
+
 
 if __name__ == "__main__":
     main()
