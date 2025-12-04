@@ -17,7 +17,6 @@ __Communication__ = 'https://github.com/FreeCAD/FreeCAD-macros/issues/'
 __Files__ = ''
 
 import csv
-from dataclasses import dataclass
 import gzip
 import os
 import re
@@ -25,9 +24,11 @@ import shutil
 import tempfile
 import zipfile
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 
 import FreeCAD as app
+from FreeCAD import Placement, Rotation, Vector
 import FreeCADGui as gui
 import requests
 
@@ -61,6 +62,11 @@ class DHFrame:
 class Robot:
     """A robot defined by Denavit-Hartenberg parameters."""
     frames: list[DHFrame]
+
+
+X_AXIS = Vector(1, 0, 0)
+Y_AXIS = Vector(0, 1, 0)
+Z_AXIS = Vector(0, 0, 1)
 
 
 def extract_single_file_zip(
@@ -135,12 +141,13 @@ def save_wrl(obj: app.DocumentObject, file_path: Path) -> None:
 def save_obj_as_wrl(
         doc: app.Document,
         label: str,
-        placement: app.Placement,
+        placement: Placement,
         directory: Path,
         ) -> Path:
     """Export a FreeCAD object with the given label to a WRL file."""
     obj = doc.getObjectsByLabel(label)[0]
     obj.Placement = placement
+    obj.Document.recompute()
     base_wrl = directory / f"{label.lower()}.wrl"
     save_wrl(obj, base_wrl)
     return base_wrl
@@ -148,13 +155,41 @@ def save_obj_as_wrl(
 
 def create_wrl(doc: app.Document, file_path: Path) -> None:
     """Export the robot model to a WRL file."""
-    def includewrl(file_path: Path, axis: int, indent: str = "") -> (str, str):
+    def includewrl(
+        file_path: Path,
+        axis: int,
+        joint_transform: Placement,
+        indent: str = "",
+    ) -> (str, str):
+        v = joint_transform.Base
+        a = joint_transform.Rotation.Axis
+        theta = joint_transform.Rotation.Angle  # rad
+
         before = ""
         after = ""
         before += f"{indent}# {file_path.name}\n"
-        before += f"{indent}DEF FREECAD_AXIS{axis} Transform {{\n"
+        before += f"{indent}Transform {{\n"  # Level 1.
         indent += "  "  # A copy.
-        before += f"{indent}children [\n"
+        before += f"{indent}translation {v.x} {v.y} {v.z}\n"
+        before += f"{indent}rotation {a.x} {a.y} {a.z} {theta}\n"
+        before += f"{indent}children [\n"  # Level 2.
+        indent += "  "
+        before += f"{indent}DEF FREECAD_AXIS{axis} Transform {{\n"  # Level 3.
+        indent += "  "
+        before += f"{indent}rotation 0 0 1 0\n"
+        indent += "  "
+        before += f"{indent}children [\n"  # Level 4.
+        indent += "  "
+        before += f"{indent}Transform {{\n"  # Level 5.
+        indent += "  "
+        before += f"{indent}rotation {a.x} {a.y} {a.z} {-theta}\n"
+        indent += "  "
+        before += f"{indent}children [\n"  # Level 6.
+        indent += "  "
+        before += f"{indent}Transform {{\n"  # Level 7.
+        indent += "  "
+        before += f"{indent}translation {-v.x} {-v.y} {-v.z}\n"
+        before += f"{indent}children [\n"  # Level 8.
         indent += "  "
         # Replace the `DEF o?+` definition with `DEF {file_path.stem}_o...`
         # to avoid name clashes (also change `USE o?+`).
@@ -166,71 +201,111 @@ def create_wrl(doc: app.Document, file_path: Path) -> None:
                 line = regex_use.sub(f"USE {file_path.stem}_o\\1", line)
                 before += indent + line + "\n"
         indent = indent[:-2]
-        after += f"{indent}]\n"  # Close children.
+        after += f"{indent}]\n"  # Level 8. Close children.
         indent = indent[:-2]
-        after += f"{indent}}} # {file_path.name}\n"  # Close Transform.
+        after += f"{indent}}}\n"  # Level 7. Close Transform.
+        indent = indent[:-2]
+        after += f"{indent}]\n"  # Level 6. Close children.
+        indent = indent[:-2]
+        after += f"{indent}}}\n"  # Level 5. Close Transform.
+        indent = indent[:-2]
+        after += f"{indent}]\n"  # Level 4. Close children.
+        indent = indent[:-2]
+        after += f"{indent}}}\n"  # Level 3. Close Transform.
+        indent = indent[:-2]
+        after += f"{indent}]\n"  # Level 2.Close children.
+        indent = indent[:-2]
+        after += f"{indent}}}\n"  # Level 1. Close Transform.
         return before, after
 
     directory = file_path.parent
+
+    # Bring the complete robot z-up, TCP x+ with all axes at 0°..
+    global_transform = Placement(
+        Vector(0.0, 0.0, 0.0),
+        Rotation(X_AXIS, -90) * Rotation(Z_AXIS, 180),
+    )
+    global_transform.Rotation = Rotation() # Neutralize for now.
     base_wrl = save_obj_as_wrl(
             doc,
             "BASE_AXIS",
-            # app.Placement(
-            #     app.Vector(0, 0, 0),
-            #     app.Rotation(app.Vector(1, 0, 0), -90) * app.Rotation(app.Vector(0, 0, 1), 180),
-            # ),
-            app.Placement(),
+            global_transform,
             directory,
     )
 
     s_wrl = save_obj_as_wrl(
             doc,
             "S_AXIS",
-            app.Placement(),
+            global_transform,
             directory,
     )
 
     l_wrl = save_obj_as_wrl(
             doc,
             "L_AXIS",
-            app.Placement(),
+            global_transform,
             directory,
     )
 
     u_wrl = save_obj_as_wrl(
             doc,
             "U_AXIS",
-            app.Placement(),
+            global_transform,
             directory,
     )
 
     r_wrl = save_obj_as_wrl(
             doc,
             "R_AXIS",
-            app.Placement(),
+            global_transform,
             directory,
     )
 
     b_wrl = save_obj_as_wrl(
             doc,
             "B_AXIS",
-            app.Placement(),
+            global_transform,
             directory,
     )
 
     t_wrl = save_obj_as_wrl(
             doc,
             "T_AXIS",
-            app.Placement(),
+            global_transform,
             directory,
     )
 
     files = [s_wrl, l_wrl, u_wrl, r_wrl, b_wrl, t_wrl]
+
+    # How to obtain placements:
+    # - Load the URDF with the CROSS workbench.
+    # - App.ActiveDocument.motoman_gp180_120.Rotation = Rotation(180, 0, 90)
+    # - turn_axis = Rotation(180, 0, 90)
+    # - pl_2_l = App.ActiveDocument.joint_2_l.Placement * turn_axis
+    placements = [
+            Placement(),  # 1_s
+
+            # Placement(Vector(-325, 650, 0), Rotation(180, 0, 0)),  # App.ActiveDocument.joint_2_l.Placement
+            Placement(Vector(-325, 650, 0), Rotation(0, 0, 90)),  # 2_l
+
+            # Placement(Vector(-325, 1800, 0), Rotation(-180, 0, -180)),  # 3_u
+            Placement(Vector(-325, 1800, 0), Rotation(0, 0, -90)),  # 3_u
+
+            # Placement(Vector(-325, 2100, 0), Rotation(90, 0, 90)),  # 4_r
+            Placement(Vector(-325, 2100, 0), Rotation(-90, 0, 0)),  # 4_r
+
+            # Placement(Vector(-1915, 2100, 0), Rotation(180, 0, 180)),  # 5_b
+            Placement(Vector(-1915, 2100, 0), Rotation(0, 0, -90)),  # 5_b
+
+            # Placement(Vector(-2140, 2100, 0), Rotation(90, 0,90)),  # 6_t
+            Placement(Vector(-2140, 2100, 0), Rotation(-90, 0, 0)),  # 6_t
+    ]
     before_parts = []
     after_parts = []
     indent = "    "
     for i in range(len(files)):
-        before, after = includewrl(files[i], axis=i + 1, indent=indent)
+        t = placements[i] * global_transform
+        before, after = includewrl(files[i], axis=i + 1, joint_transform=t, indent=indent)
         before_parts.append(before)
         after_parts.append(after)
         indent += "  "
@@ -312,7 +387,7 @@ def main():
 
     # Adjust orientation to have Z up, TCP at X+,Y0 at home position.
     robot_obj = doc.getObjectsByLabel("gp180-120")[0]
-    robot_obj.Placement.Rotation = app.Rotation(app.Vector(1, 0, 0), -90) * app.Rotation(app.Vector(0, 0, 1), 180)
+    robot_obj.Placement.Rotation = Rotation(Vector(1, 0, 0), -90) * Rotation(Vector(0, 0, 1), 180)
     doc.recompute()
 
     # Write the Kinematics file.
@@ -325,3 +400,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
