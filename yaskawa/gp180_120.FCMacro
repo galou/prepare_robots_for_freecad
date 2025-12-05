@@ -420,8 +420,11 @@ def main():
     doc.recompute()
 
     # Adjust orientation to have Z up, TCP at X+,Y0 at home position.
-    robot_obj = doc.getObjectsByLabel("gp180-120")[0]
-    robot_obj.Placement.Rotation = Rotation(Vector(1, 0, 0), -90) * Rotation(Vector(0, 0, 1), 180)
+    # TODO(Gaël): this has no effect since the part transform is not taken into account
+    # when exporting. To correctly export, the transform has to be applied to the
+    # indivual objects.
+    # robot_obj = doc.getObjectsByLabel("gp180-120")[0]
+    # robot_obj.Placement.Rotation = Rotation(Vector(1, 0, 0), -90) * Rotation(Vector(0, 0, 1), 180)
     doc.recompute()
 
     # Write the Kinematics file.
