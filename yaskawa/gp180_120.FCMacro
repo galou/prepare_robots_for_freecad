@@ -18,7 +18,6 @@ __Files__ = ''
 
 import csv
 import gzip
-import os
 import re
 import shutil
 import tempfile
@@ -31,13 +30,14 @@ import FreeCAD as app
 from FreeCAD import Placement, Rotation, Vector
 import FreeCADGui as gui
 import requests
+from PySide import QtWidgets  # FreeCAD's PySide!
 
 
 @dataclass
 class DHFrame:
     """A Denavit-Hartenberg frame.
 
-    Only prismatic joints are supported.
+    Only revolute joints are supported.
     """
     # Translation along the original z axis, in millimeters.
     d: float
@@ -67,6 +67,31 @@ class Robot:
 X_AXIS = Vector(1, 0, 0)
 Y_AXIS = Vector(0, 1, 0)
 Z_AXIS = Vector(0, 0, 1)
+
+
+def download_original(dest_dir_path: Path) -> Path | None:
+    """Download and extract the original GP180-120 STEP file.
+
+    Args:
+        dest_dir_path (Path): Directory to store the downloaded and extracted files.
+
+    Returns:
+        The path to the extracted STEP file.
+    """
+    url = "https://www.yaskawa.eu.com/_downloads/download_d3360"
+    local_filename = dest_dir_path / "downloaded_file.zip"
+    if not download_file(url, local_filename):
+        return
+
+    # Extract the STEP file
+    step_member_path = "GP180_120_3D/gp180-120.stp"
+    dest_step_path = dest_dir_path / "gp180-120.stp"
+    try:
+        extract_single_file(local_filename, step_member_path, dest_step_path)
+    except ValueError as e:
+        app.Console.PrintError(f"Extraction failed: {e}\n")
+        return None
+    return dest_step_path
 
 
 def extract_single_file_zip(
@@ -358,25 +383,36 @@ def create_csv(file_path: Path) -> None:
             ])
 
 
+def save_files(files: list[Path], dest_dir: Path) -> None:
+    """Open a dialog to save files to a user-selected directory."""
+    app_gui = gui.getMainWindow()
+    dest_dir_str = QtWidgets.QFileDialog.getExistingDirectory(
+        app_gui,
+        "Select directory to save files",
+        str(dest_dir),
+        QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.DontResolveSymlinks,
+    )
+    if not dest_dir_str:
+        app.Console.PrintMessage("Operation cancelled by user.\n")
+        return
+    dest_dir_path = Path(dest_dir_str)
+    for file_path in files:
+        dest_path = dest_dir_path / file_path.name
+        shutil.copy(file_path, dest_path)
+        app.Console.PrintMessage(f'Saved file to: "{dest_path}"\n')
+
+
 def main():
     temp_dir = Path(tempfile.mkdtemp())
 
-    url = "https://www.yaskawa.eu.com/_downloads/download_d3360"
-    local_filename = os.path.join(temp_dir, "downloaded_file.zip")
-    if not download_file(url, Path(local_filename)):
-        return
-
-    # Only extract the STEP file
-    step_member_path = "GP180_120_3D/gp180-120.stp"
-    dest_step_path = temp_dir / "gp180-120.stp"
     try:
-        extract_single_file(local_filename, step_member_path, dest_step_path)
-    except ValueError as e:
-        app.Console.PrintError(f"Extraction failed: {e}\n")
+        step_path = download_original(temp_dir)
+    except ValueError:
+        return
+    if step_path is None:
         return
 
-    # doc = app.newDocument("GP180_120", temp=True)
-    doc = app.newDocument("GP180_120")
+    doc = app.newDocument("GP180_120", temp=True, hidden=True)
 
     app.Console.PrintMessage('Opening STEP file: "{dest_step_path}"\n')
     import ImportGui  # noqa: F401
@@ -396,6 +432,11 @@ def main():
 
     output_wrl_path = temp_dir / "gp180-120.wrl"
     create_wrl(doc, output_wrl_path)
+
+    save_files([output_csv_path, output_wrl_path], temp_dir)
+
+    app.closeDocument(doc.Name)
+    shutil.rmtree(temp_dir)
 
 
 if __name__ == "__main__":
