@@ -415,10 +415,8 @@ def main():
     doc = app.newDocument("GP180_120", temp=True, hidden=True)
 
     app.Console.PrintMessage('Opening STEP file: "{dest_step_path}"\n')
-    import ImportGui  # noqa: F401
     from freecad import module_io
-    module_io.OpenInsertObject("ImportGui", str(dest_step_path), "insert", doc.Name)
-    # ImportGui.insert(str(dest_step_path))
+    module_io.OpenInsertObject("Import", str(step_path), "insert", doc.Name)
     doc.recompute()
 
     # Adjust orientation to have Z up, TCP at X+,Y0 at home position.
