@@ -17,232 +17,26 @@ __Communication__ = 'https://github.com/FreeCAD/FreeCAD-macros/issues/'
 __Files__ = ''
 
 import csv
-import gzip
-import re
-import shutil
 import tempfile
-import zipfile
-from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
 
 import FreeCAD as app
 from FreeCAD import Placement, Rotation, Vector
-import FreeCADGui as gui
-import requests
-from PySide import QtWidgets  # FreeCAD's PySide!
 
-
-@dataclass
-class DHFrame:
-    """A Denavit-Hartenberg frame.
-
-    Only revolute joints are supported.
-    """
-    # Translation along the original z axis, in millimeters.
-    d: float
-
-    # Rotation about the original z axis, in degrees.
-    # The actuation of the joint will be added to this parameter.
-    theta: float
-
-    # Translation along the new x axis (sometimes called `a`), in millimeters.
-    r: float
-
-    # Rotation about the new x axis, in degrees.
-    alpha: float
-
-    # Mechanical joint parameters, in ° and °/s.
-    min_angle: float
-    max_angle: float
-    velocity: float
-
-
-@dataclass
-class Robot:
-    """A robot defined by Denavit-Hartenberg parameters."""
-    frames: list[DHFrame]
-
-
-X_AXIS = Vector(1, 0, 0)
-Y_AXIS = Vector(0, 1, 0)
-Z_AXIS = Vector(0, 0, 1)
-
-
-def download_original(dest_dir_path: Path) -> Path | None:
-    """Download and extract the original GP180-120 STEP file.
-
-    Args:
-        dest_dir_path (Path): Directory to store the downloaded and extracted files.
-
-    Returns:
-        The path to the extracted STEP file.
-    """
-    url = "https://www.yaskawa.eu.com/_downloads/download_d3360"
-    local_filename = dest_dir_path / "downloaded_file.zip"
-    if not download_file(url, local_filename):
-        return
-
-    # Extract the STEP file
-    step_member_path = "GP180_120_3D/gp180-120.stp"
-    dest_step_path = dest_dir_path / "gp180-120.stp"
-    try:
-        extract_single_file(local_filename, step_member_path, dest_step_path)
-    except ValueError as e:
-        app.Console.PrintError(f"Extraction failed: {e}\n")
-        return None
-    return dest_step_path
-
-
-def extract_single_file_zip(
-        archive_path: Path,
-        member_path: str,
-        dest_path: Path,
-) -> None:
-    """Extract a single file from a ZIP archive.
-
-    Args:
-        archive_path (Path): Path to the ZIP archive.
-        member_path (str): Path of the file inside the archive to extract.
-        dest_path (Path): Destination file.
-    """
-    if not zipfile.is_zipfile(archive_path):
-        raise ValueError(f'"{archive_path}" is not a valid ZIP file.')
-    with zipfile.ZipFile(archive_path, "r") as zip_f:
-        if member_path not in zip_f.namelist():
-            raise ValueError(f'"{member_path}" not found in "{archive_path}".')
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        zip_f.extract(member_path, dest_path.parent)
-        extracted_file = dest_path.parent / Path(member_path)
-        extracted_file.rename(dest_path)
-
-
-def extract_single_file(
-        archive_path: Path,
-        member_path: str,
-        dest_path: Path,
-        ) -> None:
-    """Extract a single file from an archive (ZIP or TAR).
-
-    Args:
-        archive_path (Path): Path to the ZIP archive.
-        member_path (str): Path of the file inside the archive to extract.
-        dest_path (Path): Destination file.
-    """
-    with suppress(ValueError):
-        extract_single_file_zip(archive_path, member_path, dest_path)
-        return
-    raise ValueError(f'No known method to extract "{member_path}" from "{archive_path}".')
-
-
-def download_file(url: str, local_path: Path) -> bool:
-    """Download a file from a URL to a local path."""
-    try:
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(local_path, 'wb') as f:
-                shutil.copyfileobj(r.raw, f)
-        app.Console.PrintMessage(f"Downloaded file to: {local_path}\n")
-        return True
-    except Exception as e:
-        app.Console.PrintError(f"Download failed: {e}\n")
-        return False
-
-
-def save_wrl(obj: app.DocumentObject, file_path: Path) -> None:
-    """Save a FreeCAD object to a VRML file (clear text)."""
-    # Even if the extension is `wrl`, FreeCAD exports in `wrz` format (compressed).
-    # So first export to `wrz`, then uncompress to `wrl`.
-    wrz_path = file_path.with_suffix('.wrz')
-    app.Console.PrintMessage(f'Saving WRZ file to: "{file_path}"\n')
-    gui.export([obj], str(wrz_path))
-
-    # Uncmpress WRZ (gzipped) to WRL (clear text).
-    with gzip.open(wrz_path, "r") as f_in:
-        with file_path.open("wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
-
-
-def save_obj_as_wrl(
-        doc: app.Document,
-        label: str,
-        placement: Placement,
-        directory: Path,
-        ) -> Path:
-    """Export a FreeCAD object with the given label to a WRL file."""
-    obj = doc.getObjectsByLabel(label)[0]
-    obj.Placement = placement
-    obj.Document.recompute()
-    base_wrl = directory / f"{label.lower()}.wrl"
-    save_wrl(obj, base_wrl)
-    return base_wrl
+from prepare_robots_utils import (
+        download_original,
+        include_vrml_file,
+        save_files,
+        save_obj_as_wrl,
+        Robot,
+        DHFrame,
+        X_AXIS,
+        Z_AXIS,
+)
 
 
 def create_wrl(doc: app.Document, file_path: Path) -> None:
     """Export the robot model to a WRL file."""
-    def includewrl(
-        file_path: Path,
-        axis: int,
-        joint_transform: Placement,
-        indent: str = "",
-    ) -> (str, str):
-        v = joint_transform.Base
-        a = joint_transform.Rotation.Axis
-        theta = joint_transform.Rotation.Angle  # rad
-
-        before = ""
-        after = ""
-        before += f"{indent}# {file_path.name}\n"
-        before += f"{indent}Transform {{\n"  # Level 1.
-        indent += "  "  # A copy.
-        before += f"{indent}translation {v.x} {v.y} {v.z}\n"
-        before += f"{indent}rotation {a.x} {a.y} {a.z} {theta}\n"
-        before += f"{indent}children [\n"  # Level 2.
-        indent += "  "
-        before += f"{indent}DEF FREECAD_AXIS{axis} Transform {{\n"  # Level 3.
-        indent += "  "
-        before += f"{indent}rotation 0 0 1 0\n"
-        indent += "  "
-        before += f"{indent}children [\n"  # Level 4.
-        indent += "  "
-        before += f"{indent}Transform {{\n"  # Level 5.
-        indent += "  "
-        before += f"{indent}rotation {a.x} {a.y} {a.z} {-theta}\n"
-        indent += "  "
-        before += f"{indent}children [\n"  # Level 6.
-        indent += "  "
-        before += f"{indent}Transform {{\n"  # Level 7.
-        indent += "  "
-        before += f"{indent}translation {-v.x} {-v.y} {-v.z}\n"
-        before += f"{indent}children [\n"  # Level 8.
-        indent += "  "
-        # Replace the `DEF o?+` definition with `DEF {file_path.stem}_o...`
-        # to avoid name clashes (also change `USE o?+`).
-        regex_def = re.compile(r"DEF\s+o([0-9]+)")
-        regex_use = re.compile(r"USE\s+o([0-9]+)")
-        with file_path.open("r") as f:
-            for line in f:
-                line = regex_def.sub(f"DEF {file_path.stem}_o\\1", line)
-                line = regex_use.sub(f"USE {file_path.stem}_o\\1", line)
-                before += indent + line + "\n"
-        indent = indent[:-2]
-        after += f"{indent}]\n"  # Level 8. Close children.
-        indent = indent[:-2]
-        after += f"{indent}}}\n"  # Level 7. Close Transform.
-        indent = indent[:-2]
-        after += f"{indent}]\n"  # Level 6. Close children.
-        indent = indent[:-2]
-        after += f"{indent}}}\n"  # Level 5. Close Transform.
-        indent = indent[:-2]
-        after += f"{indent}]\n"  # Level 4. Close children.
-        indent = indent[:-2]
-        after += f"{indent}}}\n"  # Level 3. Close Transform.
-        indent = indent[:-2]
-        after += f"{indent}]\n"  # Level 2.Close children.
-        indent = indent[:-2]
-        after += f"{indent}}}\n"  # Level 1. Close Transform.
-        return before, after
-
     directory = file_path.parent
 
     # Bring the complete robot z-up, TCP x+ with all axes at 0°..
@@ -330,7 +124,7 @@ def create_wrl(doc: app.Document, file_path: Path) -> None:
     indent = "    "
     for i in range(len(files)):
         t = placements[i] * global_transform
-        before, after = includewrl(files[i], axis=i + 1, joint_transform=t, indent=indent)
+        before, after = include_vrml_file(files[i], axis=i + 1, joint_transform=t, indent=indent)
         before_parts.append(before)
         after_parts.append(after)
         indent += "  "
@@ -406,7 +200,11 @@ def main():
     temp_dir = Path(tempfile.mkdtemp())
 
     try:
-        step_path = download_original(temp_dir)
+        step_path = download_original(
+                url="https://www.yaskawa.eu.com/_downloads/download_d3360",
+                member_paths=["GP180_120_3D/gp180-120.stp"],
+                dest_dir_path=temp_dir,
+        )[0]
     except ValueError:
         return
     if step_path is None:
@@ -414,7 +212,7 @@ def main():
 
     doc = app.newDocument("GP180_120", temp=True, hidden=True)
 
-    app.Console.PrintMessage('Opening STEP file: "{dest_step_path}"\n')
+    app.Console.PrintMessage(f'Opening STEP file: "{step_path}"\n')
     from freecad import module_io
     module_io.OpenInsertObject("Import", str(step_path), "insert", doc.Name)
     doc.recompute()
