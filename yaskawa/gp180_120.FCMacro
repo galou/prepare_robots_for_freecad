@@ -39,60 +39,102 @@ def create_wrl(doc: app.Document, file_path: Path) -> None:
     """Export the robot model to a WRL file."""
     directory = file_path.parent
 
+    known_labels: list[str] = [o.Label for o in doc.Objects]
+
     # Bring the complete robot z-up, TCP x+ with all axes at 0°..
     global_transform = Placement(
         Vector(0.0, 0.0, 0.0),
         Rotation(X_AXIS, -90) * Rotation(Z_AXIS, 180),
     )
-    global_transform.Rotation = Rotation() # Neutralize for now.
-    base_wrl = save_obj_as_wrl(
-            doc,
-            "BASE_AXIS",
-            global_transform,
-            directory,
-    )
+    try:
+        base_wrl = save_obj_as_wrl(
+                doc,
+                "BASE_AXIS",
+                global_transform,
+                directory,
+        )
+    except ValueError:
+        msg = f'Could not find "BASE_AXIS" object in the document, document objects are {known_labels}.'
+        app.Console.PrintError(msg + "\n")
+        raise
 
-    s_wrl = save_obj_as_wrl(
-            doc,
-            "S_AXIS",
-            global_transform,
-            directory,
-    )
+    s_placement = Placement(Vector(0, 0, 650), Rotation(0, 0, 0))
+    try:
+        s_wrl = save_obj_as_wrl(
+                doc,
+                "S_AXIS",
+                global_transform,
+                directory,
+        )
+    except ValueError:
+        msg = f'Could not find "S_AXIS" object in the document, document objects are {known_labels}.'
+        app.Console.PrintError(msg + "\n")
+        raise
 
-    l_wrl = save_obj_as_wrl(
-            doc,
-            "L_AXIS",
-            global_transform,
-            directory,
-    )
+    l_placement = Placement(Vector(325, 0, 650), Rotation(0, 0, -90))
+    try:
+        l_wrl = save_obj_as_wrl(
+                doc,
+                "L_AXIS",
+                global_transform,
+                directory,
+        )
+    except ValueError:
+        msg = f'Could not find "L_AXIS" object in the document, document objects are {known_labels}.'
+        app.Console.PrintError(msg + "\n")
+        raise
 
-    u_wrl = save_obj_as_wrl(
-            doc,
-            "U_AXIS",
-            global_transform,
-            directory,
-    )
+    u_placement = Placement(Vector(325, 0, 1800), Rotation(0, 0, -90))
+    try:
+        u_wrl = save_obj_as_wrl(
+                doc,
+                "U_AXIS",
+                global_transform,
+                directory,
+        )
+    except ValueError:
+        msg = f'Could not find "U_AXIS" object in the document, document objects are {known_labels}.'
+        app.Console.PrintError(msg + "\n")
+        raise
 
-    r_wrl = save_obj_as_wrl(
-            doc,
-            "R_AXIS",
-            global_transform,
-            directory,
-    )
+    r_placement = Placement(Vector(325, 0, 2100), Rotation(90, 0, 90))
+    try:
+        r_wrl = save_obj_as_wrl(
+                doc,
+                "R_AXIS",
+                global_transform,
+                directory,
+        )
+    except ValueError:
+        msg = f'Could not find "R_AXIS" object in the document, document objects are {known_labels}.'
+        app.Console.PrintError(msg + "\n")
+        raise
 
-    b_wrl = save_obj_as_wrl(
-            doc,
-            "B_AXIS",
-            global_transform,
-            directory,
-    )
+    b_placement = Placement(Vector(1915, 0, 2100), Rotation(0, 0, -90))
+    try:
+        b_wrl = save_obj_as_wrl(
+                doc,
+                "B_AXIS",
+                global_transform,
+                directory,
+        )
+    except ValueError:
+        msg = f'Could not find "B_AXIS" object in the document, document objects are {known_labels}.'
+        app.Console.PrintError(msg + "\n")
+        raise
 
-    t_wrl = save_obj_as_wrl(
-            doc,
-            "T_AXIS",
-            global_transform,
-            directory,
-    )
+    t_placement = Placement(Vector(2140, 0, 2100), Rotation(90, 0,90))
+    try:
+        t_wrl = save_obj_as_wrl(
+                doc,
+                "T_AXIS",
+                global_transform,
+                directory,
+        )
+    except ValueError:
+        msg = f'Could not find "T_AXIS" object in the document, document objects are {known_labels}.'
+        app.Console.PrintError(msg + "\n")
+        raise
 
     files = [s_wrl, l_wrl, u_wrl, r_wrl, b_wrl, t_wrl]
 
@@ -102,22 +144,12 @@ def create_wrl(doc: app.Document, file_path: Path) -> None:
     # - turn_axis = Rotation(180, 0, 90)
     # - pl_2_l = App.ActiveDocument.joint_2_l.Placement * turn_axis
     placements = [
-            Placement(),  # 1_s
-
-            # Placement(Vector(-325, 650, 0), Rotation(180, 0, 0)),  # App.ActiveDocument.joint_2_l.Placement
-            Placement(Vector(-325, 650, 0), Rotation(0, 0, 90)),  # 2_l
-
-            # Placement(Vector(-325, 1800, 0), Rotation(-180, 0, -180)),  # 3_u
-            Placement(Vector(-325, 1800, 0), Rotation(0, 0, -90)),  # 3_u
-
-            # Placement(Vector(-325, 2100, 0), Rotation(90, 0, 90)),  # 4_r
-            Placement(Vector(-325, 2100, 0), Rotation(-90, 0, 0)),  # 4_r
-
-            # Placement(Vector(-1915, 2100, 0), Rotation(180, 0, 180)),  # 5_b
-            Placement(Vector(-1915, 2100, 0), Rotation(0, 0, -90)),  # 5_b
-
-            # Placement(Vector(-2140, 2100, 0), Rotation(90, 0,90)),  # 6_t
-            Placement(Vector(-2140, 2100, 0), Rotation(-90, 0, 0)),  # 6_t
+            s_placement,
+            l_placement,
+            u_placement,
+            r_placement,
+            b_placement,
+            t_placement,
     ]
     before_parts = []
     after_parts = []
@@ -177,25 +209,6 @@ def create_csv(file_path: Path) -> None:
             ])
 
 
-def save_files(files: list[Path], dest_dir: Path) -> None:
-    """Open a dialog to save files to a user-selected directory."""
-    app_gui = gui.getMainWindow()
-    dest_dir_str = QtWidgets.QFileDialog.getExistingDirectory(
-        app_gui,
-        "Select directory to save files",
-        str(dest_dir),
-        QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.DontResolveSymlinks,
-    )
-    if not dest_dir_str:
-        app.Console.PrintMessage("Operation cancelled by user.\n")
-        return
-    dest_dir_path = Path(dest_dir_str)
-    for file_path in files:
-        dest_path = dest_dir_path / file_path.name
-        shutil.copy(file_path, dest_path)
-        app.Console.PrintMessage(f'Saved file to: "{dest_path}"\n')
-
-
 def main():
     temp_dir = Path(tempfile.mkdtemp())
 
@@ -223,7 +236,7 @@ def main():
     # indivual objects.
     # robot_obj = doc.getObjectsByLabel("gp180-120")[0]
     # robot_obj.Placement.Rotation = Rotation(Vector(1, 0, 0), -90) * Rotation(Vector(0, 0, 1), 180)
-    doc.recompute()
+    # doc.recompute()
 
     # Write the Kinematics file.
     output_csv_path = temp_dir / "gp180-120_kinematics.csv"
