@@ -1,0 +1,233 @@
+
+# Longer, detailed macro description
+
+__Name__ = ''
+__Comment__ = ''
+__Author__ = ''
+__Version__ = ''
+__Date__ = 'YYYY-MM-DD'
+__License__ = 'LGPL-2.0-or-later'
+__Web__ = 'http://forum.freecadweb.org/viewtopic.php?f=?&t=????'
+__Wiki__ = 'http://www.freecadweb.org/wiki/Macro_Title_Of_macro'
+__Icon__ = ''
+__Help__ = ''
+__Status__ = ''
+__Requires__ = 'FreeCAD ?.??'
+__Communication__ = 'https://github.com/FreeCAD/FreeCAD-macros/issues/'
+__Files__ = ''
+
+import tempfile
+import shutil
+from pathlib import Path
+
+import FreeCAD as app
+from FreeCAD import Placement, Rotation, Vector
+
+from prepare_robots_utils import (
+        download_original,
+        include_vrml_file,
+        save_files,
+        save_obj_as_wrl,
+        write_csv,
+        Robot,
+        DHFrame,
+)
+
+
+def create_wrl(doc: app.Document, file_path: Path) -> None:
+    """Export the robot model to a WRL file."""
+    directory = file_path.parent
+
+    # The robot is already z-up, TCP x+ with all axes at 0°.
+    base_wrl = save_obj_as_wrl(
+            doc,
+            "IRB1600_X-145_IRC5_rev1_BASE",
+            Placement(),
+            directory,
+    )
+
+    # Matrix to move Y to Z:
+    # y_to_z = Rotation(Vector(1, 0, 0), 90)
+    # axis1_placement = doc_from_urdf_with_CROSS.joint_1.Placement * y_to_z
+    axis1_placement = Placement(Vector(0.0, 0.0, 0.0), Rotation(0.0, 0.0, 90.0))
+    axis1_wrl = save_obj_as_wrl(
+            doc,
+            "IRB1600_X-145_IRC5_rev1_LINK1",
+            Placement(),
+            directory,
+    )
+
+    # axis2_placement = doc_from_urdf_with_CROSS.joint_2.Placement * y_to_z
+    axis2_placement = Placement(Vector(150.0, 0.0, 486.5), Rotation(0.0, 0.0, 0.0))
+    axis2_wrl = save_obj_as_wrl(
+            doc,
+            "IRB1600_X-145_IRC5_rev1_LINK2",
+            Placement(),
+            directory,
+    )
+
+    axis3_placement = Placement(Vector(150.0, 0.0, 1186.5), Rotation(0.0, 0.0, 0.0))
+    axis3_wrl = save_obj_as_wrl(
+            doc,
+            "IRB1600_X-145_IRC5_rev1_LINK3",
+            Placement(),
+            directory,
+    )
+
+    axis4_placement = Placement(Vector(450.0, 0.0, 1186.5), Rotation(0.0, 90.0, 90.0))
+    axis4_wrl = save_obj_as_wrl(
+            doc,
+            "IRB1600_X-145_IRC5_rev1_LINK4",
+            Placement(),
+            directory,
+    )
+
+    axis5_placement = Placement(Vector(750.0, 0.0, 1186.5), Rotation(0.0, 0.0, 0.0))
+    axis5_wrl = save_obj_as_wrl(
+            doc,
+            "IRB1600_X-145_IRC5_rev1_LINK5",
+            Placement(),
+            directory,
+    )
+
+    axis6_placement = Placement(Vector(815.0, 0.0, 1186.5), Rotation(0.0, 90.0, 90.0))
+    axis6_wrl = save_obj_as_wrl(
+            doc,
+            "IRB1600_X-145_IRC5_rev1_LINK6",
+            Placement(),
+            directory,
+    )
+
+    files = [axis1_wrl, axis2_wrl, axis3_wrl, axis4_wrl, axis5_wrl, axis6_wrl]
+
+    # How to obtain placements:
+    # - Load the URDF with the CROSS workbench.
+    # - App.ActiveDocument.motoman_gp180_120.Rotation = Rotation(180, 0, 90)
+    # - turn_axis = Rotation(180, 0, 90)
+    # - pl_2_l = App.ActiveDocument.joint_2_l.Placement * turn_axis
+    placements = [
+            axis1_placement,
+            axis2_placement,
+            axis3_placement,
+            axis4_placement,
+            axis5_placement,
+            axis6_placement,
+    ]
+    before_parts = []
+    after_parts = []
+    indent = "    "
+    for i in range(len(files)):
+        t = placements[i]
+        before, after = include_vrml_file(files[i], axis=i + 1, joint_transform=t, indent=indent)
+        before_parts.append(before)
+        after_parts.append(after)
+        indent += "  "
+
+    with file_path.open("w", newline="") as f:
+        f.write("#VRML V2.0 utf8\n")
+        f.write("DEF IRB1600_10_145 Group {\n")
+        f.write("  children [\n")
+        with base_wrl.open("r") as base_f:
+            for line in base_f:
+                f.write("    " + line)
+        for before in before_parts:
+            f.write(before)
+        for after in reversed(after_parts):
+            f.write(after)
+        f.write("  ]\n")
+        f.write("}\n")
+
+
+def create_csv(file_path: Path) -> None:
+    #  Result of
+    #  `ros2 run urdf_to_dh generate_dh --ros-args -p urdf_file:=irb1600_10_145.urdf.
+    # ,  joint,          parent,    child,  d,      theta, r,    alpha
+    # 0, joint_1,        base_link, link_1, 0.0,    0.0,   0.0,  0.0
+    # 2, jjoint_2,        link_1,    link_2, 0.4865, 0.0,   0.15, -90.0
+    # 3, joint_3,        link_2,    link_3, 0.0,    -90.0, 0.7,  0.0
+    # 4, joint_4,        link_3,    link_4, 0.0,    -0.0,  0.0,  -90.0
+    # 5, joint_5,        link_4,    link_5, 0.6,    0.0,   0.0,  90.0
+    # 6, joint_6,        link_5,    link_6, -0.0,   -0.0,  0.0,  -90.0
+    # 7, joint_6-flange, link_6,    flange, 0.065,  0.0,   0.0,  0.0
+    # 8, link_6-tool0,   flange,    tool0,  0.0,    -90.0, 0.0,  90.0
+    #
+    # According to https://github.com/Dhivin/Inverse-Kinematics-of-ABB-IRB-1600
+    #  for ABB 1600-X/1.2
+    # The DH Parameter are as follows
+    #    i       Link twist     Link Length     Link Offset    Joint Angle
+    # --------------------------------------------------------------------------
+    #    1        -90              d2             d1                 theta1*
+    #    2         0               d3              0               theta2 - 90*
+    #    3        -90               0              0                 theta3*
+    #    4         90               0             d4                 theta4*
+    #    5        -90               0              0                 theta5*
+    #    6         0                0             d5                 theta6*
+    d1 = 486.5
+    d2 = 150.0
+    d3 = 700.0
+    d4 = 600.0
+    d5 = 65.0
+
+    kinematics = Robot([
+        DHFrame(d=d1,  theta=0.0,   r=d2,  alpha=-90.0, min_angle=-180.0, max_angle=180.0, velocity=100.0),  # joint 1
+        DHFrame(d=0.0, theta=-90.0, r=d3,  alpha=0.0,   min_angle=-90.0,  max_angle=90.0,  velocity=100.0),  # joint 2
+        DHFrame(d=0.0, theta=0.0,   r=0.0, alpha=-90.0, min_angle=-135.0, max_angle=135.0, velocity=100.0),  # joint 3
+        DHFrame(d=d4,  theta=0.0,   r=0.0, alpha=90.0,  min_angle=-360.0, max_angle=360.0, velocity=100.0),  # joint 4
+        DHFrame(d=0.0, theta=0.0,   r=0.0, alpha=-90.0, min_angle=-125.0, max_angle=125.0, velocity=100.0),  # joint 5
+        DHFrame(d=d5,  theta=0.0,   r=0.0, alpha=0.0,   min_angle=-360.0, max_angle=360.0, velocity=150.0),  # joint 6
+    ])
+
+    write_csv(file_path, kinematics)
+
+
+def main() -> None:
+    temp_dir = Path(tempfile.mkdtemp())
+
+    try:
+        step_paths = download_original(
+                url="https://library.e.abb.com/public/f67c694bf9c44778bbc47184cc76cf17/IRB1600_X-145_STEP_rev03_j.zip",
+                member_paths=[
+                    "IRB1600_X-145_STEP_rev03_j/IRB1600_X-145_STEP_joint/IRB1600_X-145_IRC5_rev2_BASE.STEP",
+                    "IRB1600_X-145_STEP_rev03_j/IRB1600_X-145_STEP_joint/IRB1600_X-145_IRC5_rev2_LINK1.STEP",
+                    "IRB1600_X-145_STEP_rev03_j/IRB1600_X-145_STEP_joint/IRB1600_X-145_IRC5_rev2_LINK2.STEP",
+                    "IRB1600_X-145_STEP_rev03_j/IRB1600_X-145_STEP_joint/IRB1600_X-145_IRC5_rev2_LINK3.STEP",
+                    "IRB1600_X-145_STEP_rev03_j/IRB1600_X-145_STEP_joint/IRB1600_X-145_IRC5_rev2_LINK4.STEP",
+                    "IRB1600_X-145_STEP_rev03_j/IRB1600_X-145_STEP_joint/IRB1600_X-145_IRC5_rev2_LINK5.STEP",
+                    "IRB1600_X-145_STEP_rev03_j/IRB1600_X-145_STEP_joint/IRB1600_X-145_IRC5_rev2_LINK6.STEP",
+                ],
+                dest_dir_path=temp_dir,
+        )
+    except ValueError:
+        shutil.rmtree(temp_dir)
+        return
+    if step_paths is None:
+        shutil.rmtree(temp_dir)
+        return
+
+    if not step_paths:
+        return
+
+    doc = app.newDocument("IRB5720-125-300", temp=True, hidden=True)
+
+    for step_path in step_paths:
+        app.Console.PrintMessage(f'Opening STEP file: "{step_path}"\n')
+        from freecad import module_io
+        module_io.OpenInsertObject("Import", str(step_path), "insert", doc.Name)
+    doc.recompute()
+
+    # Write the Kinematics file.
+    output_csv_path = temp_dir / "irb1600-10-145_kinematics.csv"
+    create_csv(output_csv_path)
+
+    output_wrl_path = temp_dir / "irb1600-10-145.wrl"
+    create_wrl(doc, output_wrl_path)
+
+    save_files([output_csv_path, output_wrl_path], temp_dir)
+
+    app.closeDocument(doc.Name)
+    shutil.rmtree(temp_dir)
+
+
+if __name__ == "__main__":
+    main()
+
