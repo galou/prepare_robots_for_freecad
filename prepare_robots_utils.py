@@ -20,7 +20,6 @@ import csv
 import gzip
 import re
 import shutil
-import tempfile
 import zipfile
 from contextlib import suppress
 from dataclasses import dataclass

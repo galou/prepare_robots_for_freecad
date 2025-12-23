@@ -17,6 +17,7 @@ __Communication__ = 'https://github.com/FreeCAD/FreeCAD-macros/issues/'
 __Files__ = ''
 
 import tempfile
+import shutil
 from pathlib import Path
 
 import FreeCAD as app
@@ -204,8 +205,10 @@ def main():
                 dest_dir_path=temp_dir,
         )[0]
     except ValueError:
+        shutil.rmtree(temp_dir)
         return
     if step_path is None:
+        shutil.rmtree(temp_dir)
         return
 
     doc = app.newDocument("GP180_120", temp=True, hidden=True)
