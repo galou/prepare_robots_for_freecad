@@ -88,6 +88,7 @@ def download_original(
     """
     local_filename = dest_dir_path / f"downloaded_file.{format}"
     if not download_file(url, local_filename):
+        app.Console.PrintError(f'Cannot download file from URL: "{url}"\n')
         return
 
     # Extract the files.
@@ -191,7 +192,7 @@ def save_obj_as_wrl(
     obj = objs[0]
     obj.Placement = placement
     obj.Document.recompute()
-    base_wrl = directory / f"{label.lower()}.wrl"
+    base_wrl = directory / f"{obj.Name}.wrl"
     save_wrl(obj, base_wrl)
     return base_wrl
 
