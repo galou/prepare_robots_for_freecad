@@ -16,7 +16,6 @@ __Requires__ = 'FreeCAD ?.??'
 __Communication__ = 'https://github.com/FreeCAD/FreeCAD-macros/issues/'
 __Files__ = ''
 
-import csv
 import tempfile
 from pathlib import Path
 
@@ -28,6 +27,7 @@ from prepare_robots_utils import (
         include_vrml_file,
         save_files,
         save_obj_as_wrl,
+        write_csv,
         Robot,
         DHFrame,
         X_AXIS,
@@ -192,22 +192,7 @@ def create_csv(file_path: Path) -> None:
         DHFrame(d=-lengths[5], theta=0.0,   r=0.0,        alpha=180.0, min_angle=-360.0, max_angle=360.0, velocity=265.0),
     ])
 
-    # CSV header: "a, alpha, d, theta, rotDir, maxAngle, minAngle, AxisVelocity"
-    with file_path.open("w", newline='') as csvfile:
-        csv_writer = csv.writer(csvfile)
-        csv_writer.writerow(["a", "alpha", "d", "theta", "rotDir", "maxAngle", "minAngle", "AxisVelocity"])
-        for frame in kinematics.frames:
-            csv_writer.writerow([
-                f"{frame.r}",
-                f"{frame.alpha}",
-                f"{frame.d}",
-                f"{frame.theta}",
-                "1.0",
-                f"{frame.max_angle}",
-                f"{frame.min_angle}",
-                f"{frame.velocity}",
-            ])
-
+    write_csv(file_path, kinematics)
 
 def main():
     temp_dir = Path(tempfile.mkdtemp())

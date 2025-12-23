@@ -311,3 +311,33 @@ def include_vrml_file(
     after += f"{indent}}}\n"  # Level 1. Close Transform.
     return before, after
 
+
+def write_csv(
+        file_path: Path,
+        robot: Robot,
+    ) -> None:
+    """Write the robot's DH parameters to a CSV file.
+
+    Args:
+        robot: Robot defined by Denavit-Hartenberg parameters.
+        file_path: Path to the output CSV file.
+    """
+    with file_path.open("w", newline="") as csvfile:
+        csv_writer = csv.writer(csvfile)
+        # Write the header.
+        # The format is determined by FreeCAD's robot workbench.
+        # Units: mm, deg, mm, deg, 1, deg, deg, deg/s.
+        csv_writer.writerow(["a", "alpha", "d", "theta", "rotDir", "maxAngle", "minAngle", "AxisVelocity"])
+        # Write each frame's parameters.
+        for frame in robot.frames:
+            csv_writer.writerow([
+                f"{frame.r}",
+                f"{frame.alpha}",
+                f"{frame.d}",
+                f"{frame.theta}",
+                "1.0",
+                f"{frame.max_angle}",
+                f"{frame.min_angle}",
+                f"{frame.velocity}",
+            ])
+
