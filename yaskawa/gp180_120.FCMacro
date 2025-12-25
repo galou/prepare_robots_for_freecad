@@ -25,10 +25,12 @@ from FreeCAD import Placement, Rotation, Vector
 
 from prepare_robots_utils import (
         download_original,
+        import_original,
         include_vrml_file,
         save_files,
         save_obj_as_wrl,
         write_csv,
+        ImportOptions,
         Robot,
         DHFrame,
         X_AXIS,
@@ -195,28 +197,30 @@ def create_csv(file_path: Path) -> None:
 
     write_csv(file_path, kinematics)
 
+
 def main():
     temp_dir = Path(tempfile.mkdtemp())
 
     try:
-        step_path = download_original(
+        step_paths = download_original(
                 url="https://www.yaskawa.eu.com/_downloads/download_d3360",
                 member_paths=["GP180_120_3D/gp180-120.stp"],
                 dest_dir_path=temp_dir,
-        )[0]
+        )
     except ValueError:
         shutil.rmtree(temp_dir)
         return
-    if step_path is None:
+    if step_paths is None:
         shutil.rmtree(temp_dir)
         return
 
     doc = app.newDocument("GP180_120", temp=True, hidden=True)
 
-    app.Console.PrintMessage(f'Opening STEP file: "{step_path}"\n')
-    from freecad import module_io
-    module_io.OpenInsertObject("Import", str(step_path), "insert", doc.Name)
-    doc.recompute()
+    import_options = ImportOptions(
+            format="STEP",
+            step_merge_compounds=True,
+    )
+    import_original(doc, step_paths, import_options)
 
     # Adjust orientation to have Z up, TCP at X+,Y0 at home position.
     # TODO(Gaël): this has no effect since the part transform is not taken into account

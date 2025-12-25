@@ -29,6 +29,8 @@ import FreeCAD as app
 from FreeCAD import Placement, Rotation, Vector
 import FreeCADGui as gui
 import requests
+from fpo import Preference
+from freecad import module_io
 from PySide import QtWidgets  # FreeCAD's PySide!
 
 
@@ -61,6 +63,13 @@ class DHFrame:
 class Robot:
     """A robot defined by Denavit-Hartenberg parameters."""
     frames: list[DHFrame]
+
+
+@dataclass
+class ImportOptions:
+    """User options to import robot models."""
+    format: str = "STEP"
+    step_merge_compounds: bool | None = True
 
 
 X_AXIS = Vector(1, 0, 0)
@@ -157,6 +166,62 @@ def download_file(url: str, local_path: Path) -> bool:
     except Exception as e:
         app.Console.PrintError(f"Download failed: {e}\n")
         return False
+
+
+def import_original(
+        doc: app.Document,
+        paths: Path | list[Path],
+        import_options: ImportOptions,
+) -> None:
+    """
+    Import the original robot model files into the document.
+
+    Args:
+        doc: FreeCAD document to import the model into.
+        paths: List of file paths to import.
+        import_options: User options for importing.
+    """
+    if not isinstance(paths, list):
+        paths = [paths]
+
+    old_import_options = save_import_options()
+    write_import_options(import_options)
+
+    for path in paths:
+        app.Console.PrintMessage(f'Opening {import_options.format.upper()} file: "{path}"\n')
+        module_io.OpenInsertObject("Import", str(path), "insert", doc.Name)
+    doc.recompute()
+    write_import_options(old_import_options)
+
+
+def save_import_options() -> ImportOptions:
+    """
+    Save the user import preferences into an ImportOptions dataclass.
+
+    This only reads preferences; it does not modify them.
+    A default is set by the function if the user parameter is not set but there is not
+    way to get the information whether this parameter was set by the user or not.
+    """
+    import_options = ImportOptions()
+    # Implementation note: `()` calls the getter of the preference.
+    import_options.step_merge_compounds = Preference(
+            group="Preferences/Mod/Import/hSTEP",
+            name="ReadShapeCompoundMode",
+            default=True,
+    )()
+    return import_options
+
+
+def write_import_options(import_options: ImportOptions) -> None:
+    # Implementation note: we must use `default` otherwise, the type will be `str`
+    # and corresponds then to another parameter with the same group and name but with
+    # different type.
+    step_merge_compounds_pref = Preference(
+            group="Preferences/Mod/Import/hSTEP",
+            name="ReadShapeCompoundMode",
+            default=import_options.step_merge_compounds,
+    )
+    step_merge_compounds_pref.write(import_options.step_merge_compounds)
 
 
 def save_wrl(obj: app.DocumentObject, file_path: Path) -> None:
