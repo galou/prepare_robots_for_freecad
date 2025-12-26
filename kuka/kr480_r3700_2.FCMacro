@@ -1,0 +1,232 @@
+# Longer, detailed macro description
+
+__Name__ = ''
+__Comment__ = ''
+__Author__ = ''
+__Version__ = ''
+__Date__ = 'YYYY-MM-DD'
+__License__ = 'LGPL-2.0-or-later'
+__Web__ = 'http://forum.freecadweb.org/viewtopic.php?f=?&t=????'
+__Wiki__ = 'http://www.freecadweb.org/wiki/Macro_Title_Of_macro'
+__Icon__ = ''
+__Help__ = ''
+__Status__ = ''
+__Requires__ = 'FreeCAD ?.??'
+__Communication__ = 'https://github.com/FreeCAD/FreeCAD-macros/issues/'
+__Files__ = ''
+
+# Longer, detailed macro description
+
+__Name__ = ''
+__Comment__ = ''
+__Author__ = ''
+__Version__ = ''
+__Date__ = 'YYYY-MM-DD'
+__License__ = 'LGPL-2.0-or-later'
+__Web__ = 'http://forum.freecadweb.org/viewtopic.php?f=?&t=????'
+__Wiki__ = 'http://www.freecadweb.org/wiki/Macro_Title_Of_macro'
+__Icon__ = ''
+__Help__ = ''
+__Status__ = ''
+__Requires__ = 'FreeCAD ?.??'
+__Communication__ = 'https://github.com/FreeCAD/FreeCAD-macros/issues/'
+__Files__ = ''
+
+import shutil
+import tempfile
+from pathlib import Path
+
+import FreeCAD as app
+from FreeCAD import Placement, Rotation, Vector
+
+from prepare_robots_utils import (
+    DHFrame,
+    ImportOptions,
+    Robot,
+    import_original,
+    include_vrml_file,
+    save_files,
+    save_obj_as_wrl,
+    user_download_original,
+    write_csv,
+)
+
+
+def create_wrl(doc: app.Document, file_path: Path) -> None:
+    """Export the robot model to a WRL file."""
+    directory = file_path.parent
+
+    # The robot pose in the STEP file is (0, -90, 90, 0, 0, 0) deg, which
+    # corresponds to its home position.
+
+    # The robot is already z-up, TCP x+ with all axes at 0°, so that there
+    # is not need to change the part placements.
+    base_wrl = save_obj_as_wrl(
+            doc,
+            "COMPOUND023",
+            Placement(),
+            directory,
+    )
+
+    # The placements were obtained by building the robot by hand with the
+    # CROSS workbench, set all angles to 0 and then:
+    # y_to_z = Rotation(Vector(1, 0, 0), 90) # Matrix to move Y to Z:
+    # axis1_placement = doc_from_urdf_with_CROSS.Joint.Placement * y_to_z
+    axis1_placement = Placement(Vector(0.0, 0.0, 0.0), Rotation(0.0, 0.0, 90.0))
+    axis1_wrl = save_obj_as_wrl(
+            doc,
+            "COMPOUND028",
+            Placement(),
+            directory,
+    )
+
+    # axis2_placement = doc_from_urdf_with_CROSS.Joint001.Placement * y_to_z
+    axis2_placement = Placement(Vector(500.0, 0.0, 860.0), Rotation(0.0, 90.0, 0.0))
+    axis2_wrl = save_obj_as_wrl(
+            doc,
+            "COMPOUND012",
+            Placement(Vector(-360.0, 0.0, 1360.0), Rotation(0.0,90.0,0.0)),  # To bring from position in STEP to position with all axes at 0.
+            directory,
+    )
+
+    # axis3_placement = doc_from_urdf_with_CROSS.Joint002.Placement * y_to_z
+    # axis3_placement = Placement (Vector(500.0, 0.0, 2410.0), Rotation(0.0, -90.0, 0.0))  # when Axis3 = -90°
+    axis3_placement = Placement(Vector(2050.0, 0.0, 860.0), Rotation(0.0, 0.0, 0.0)) # when Axes=0.
+    part3456_placement = Placement (Vector(1550,0,-1550), Rotation(0,0,0))  # To bring from position in STEP to position with all axes at 0.
+    axis3_wrl = save_obj_as_wrl(
+            doc,
+            "COMPOUND029",
+            part3456_placement,
+            directory,
+    )
+
+    # axis4_placement = doc_from_urdf_with_CROSS.Joint003.Placement * y_to_z
+    # axis4_placement = Placement(Vector(500,-3.9968e-14,2590), Rotation(90,-8.99597e-15,-3.59839e-14)) # when Axis3 = -90°, Axis4 = 90°
+    axis4_placement = Placement(Vector(2050.0, 0.0, 1040.0), Rotation(90.0, 0.0, 0.0)) # when Axes=0
+    axis4_wrl = save_obj_as_wrl(
+            doc,
+            "COMPOUND025",
+            part3456_placement,
+            directory,
+    )
+
+    # axis5_placement = doc_from_urdf_with_CROSS.Joint004.Placement * y_to_z
+    # axis5_placement = Placement(Vector(2140.2,-1.13256e-12,2590), Rotation(-2.69879e-14,-2.69879e-14,6.35603e-30)) # when Axis3 = -90°, Axis4 = 90°
+    axis5_placement = Placement(Vector(3690.2, 0.0, 1040.0), Rotation(0.0, 0.0, 0.0)) # when Axes=0
+    axis5_wrl = save_obj_as_wrl(
+            doc,
+            "COMPOUND013",
+            part3456_placement,
+            directory,
+    )
+
+    # axis6_placement = doc_from_urdf_with_CROSS.Joint005.Placement * y_to_z
+    # axis6_placement = Placement (Vector(2426.2, 0.0, 2590.0), Rotation(90.0, 0.0, 0.0)) # when Axis3 = -90°, Axis4 = 90°
+    axis6_placement = Placement(Vector(3976.2, 0.0, 1040.0), Rotation(90.0, 0.0, 0.0)) # when Axes=0
+    axis6_wrl = save_obj_as_wrl(
+            doc,
+            "COMPOUND010",
+            part3456_placement,
+            directory,
+    )
+
+    files = [axis1_wrl, axis2_wrl, axis3_wrl, axis4_wrl, axis5_wrl, axis6_wrl]
+
+    placements = [
+            axis1_placement,
+            axis2_placement,
+            axis3_placement,
+            axis4_placement,
+            axis5_placement,
+            axis6_placement,
+    ]
+    before_parts = []
+    after_parts = []
+    indent = "    "
+    for i in range(len(files)):
+        t = placements[i]
+        before, after = include_vrml_file(files[i], axis=i + 1, joint_transform=t, indent=indent)
+        before_parts.append(before)
+        after_parts.append(after)
+        indent += "  "
+
+    with file_path.open("w", newline="") as f:
+        f.write("#VRML V2.0 utf8\n")
+        f.write("DEF IRB1600_10_145 Group {\n")
+        f.write("  children [\n")
+        with base_wrl.open("r") as base_f:
+            for line in base_f:
+                f.write("    " + line)
+        for before in before_parts:
+            f.write(before)
+        for after in reversed(after_parts):
+            f.write(after)
+        f.write("  ]\n")
+        f.write("}\n")
+
+
+def create_csv(file_path: Path) -> None:
+    d1 = 500.0
+    d2 = 860.0
+    d3 = 1550.0
+    d4 = 180.0
+    d5 = -1640.2
+    d6 = -286.0
+
+    kinematics = Robot([
+        DHFrame(d=d2,  theta=0.0,   r=d1,  alpha=-90.0, min_angle=-185.0, max_angle=185.0, velocity=156.0), # joint 1
+        DHFrame(d=0.0, theta=0.0,   r=d3,  alpha=0.0,   min_angle=-135.0, max_angle=65.0,  velocity=156.0), # joint 2
+        DHFrame(d=0.0, theta=-90.0, r=d4,  alpha=90.0,  min_angle=-130.0, max_angle=154.0, velocity=50.0),  # joint 3
+        DHFrame(d=d5,  theta=0.0,   r=0.0, alpha=-90.0, min_angle=-350.0, max_angle=35.0,  velocity=330.0), # joint 4
+        DHFrame(d=0.0, theta=0.0,   r=0.0, alpha=90.0,  min_angle=-130.0, max_angle=130.0, velocity=50.0),  # joint 5
+        DHFrame(d=d6,  theta=180.0, r=0.0, alpha=180.0, min_angle=-350.0, max_angle=350.0, velocity=615.0), # joint 6
+    ])
+
+    write_csv(file_path, kinematics)
+
+
+def main() -> None:
+    temp_dir = Path(tempfile.mkdtemp())
+
+    try:
+        step_paths = user_download_original(
+                url="https://xpert.kuka.com/service-express/portal/project1_p/document/kuka-project1_p-basic_FI16608_de?context=%7B%7D",
+                filename="KR_480_R3700-2_V04_STP.zip",
+                member_paths=["KR_480_R3700-2_V04.stp"],
+                dest_dir_path=temp_dir,
+        )
+    except ValueError:
+        shutil.rmtree(temp_dir)
+        return
+    if step_paths is None:
+        shutil.rmtree(temp_dir)
+        return
+
+    if not step_paths:
+        return
+
+    # doc = app.newDocument("KR480-R3700-2", temp=True, hidden=True)
+    doc = app.newDocument("KR480-R3700-2")
+
+    import_options = ImportOptions(
+            format="STEP",
+            step_merge_compounds=False,
+    )
+    import_original(doc, step_paths, import_options)
+
+    # Write the Kinematics file.
+    output_csv_path = temp_dir / "kr480-r3700-2_kinematics.csv"
+    create_csv(output_csv_path)
+
+    output_wrl_path = temp_dir / "kr480-r3700-2.wrl"
+    create_wrl(doc, output_wrl_path)
+
+    save_files([output_csv_path, output_wrl_path], temp_dir)
+
+    app.closeDocument(doc.Name)
+    shutil.rmtree(temp_dir)
+
+
+if __name__ == "__main__":
+    main()
+

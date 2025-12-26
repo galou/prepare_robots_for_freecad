@@ -46,6 +46,8 @@ def create_wrl(doc: app.Document, file_path: Path) -> None:
             directory,
     )
 
+    # How to obtain placements:
+    # - Load the URDF with the CROSS workbench.
     # Matrix to move Y to Z:
     # y_to_z = Rotation(Vector(1, 0, 0), 90)
     # axis1_placement = doc_from_urdf_with_CROSS.joint_1.Placement * y_to_z
@@ -100,11 +102,6 @@ def create_wrl(doc: app.Document, file_path: Path) -> None:
 
     files = [axis1_wrl, axis2_wrl, axis3_wrl, axis4_wrl, axis5_wrl, axis6_wrl]
 
-    # How to obtain placements:
-    # - Load the URDF with the CROSS workbench.
-    # - App.ActiveDocument.motoman_gp180_120.Rotation = Rotation(180, 0, 90)
-    # - turn_axis = Rotation(180, 0, 90)
-    # - pl_2_l = App.ActiveDocument.joint_2_l.Placement * turn_axis
     placements = [
             axis1_placement,
             axis2_placement,

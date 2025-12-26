@@ -31,12 +31,13 @@ import FreeCADGui as gui
 import requests
 from fpo import Preference
 from freecad import module_io
-from PySide import QtWidgets  # FreeCAD's PySide!
+from PySide import QtCore, QtWidgets  # FreeCAD's PySide!
 
 
 @dataclass
 class DHFrame:
-    """A Denavit-Hartenberg frame.
+    """
+    A Denavit-Hartenberg frame.
 
     Only revolute joints are supported.
     """
@@ -83,7 +84,7 @@ def download_original(
         dest_dir_path: Path,
         format: str = "zip",
 ) -> list[Path] | None:
-    """Download and extract the original GP180-120 STEP file.
+    """Download and extract the original robot model files.
 
     Args:
         url: URL to download the archive from.
@@ -110,6 +111,76 @@ def download_original(
             return None
         dest_paths.append(dest_path)
     return dest_paths
+
+
+def user_download_original(
+        url: str,
+        filename: str,
+        member_paths: list[str],
+        dest_dir_path: Path,
+        format: str = "zip",
+) -> list[Path] | None:
+    """
+    Request the user to download and extract the original robot model files.
+
+    Args:
+        url: URL to download the archive from.
+        filename: Expected filename for the downloaded file.
+        member_paths: List of relative file paths inside the archive to extract.
+        dest_dir_path: Directory to store the downloaded and extracted files.
+        format: Archive format (defaults to "zip").
+    """
+    archive_path = request_download(url, filename)
+    if not archive_path:
+        app.Console.PrintError("Cancelled on user request\n")
+        return
+
+    # Extract the files.
+    dest_paths: list[Path] = []
+    for member_path in member_paths:
+        dest_path = dest_dir_path / member_path
+        try:
+            extract_single_file(archive_path, member_path, dest_path)
+        except ValueError as e:
+            app.Console.PrintError(f"Extraction failed: {e}\n")
+            return None
+        dest_paths.append(dest_path)
+    return dest_paths
+
+
+def request_download(url: str, filename: str) -> Path | None:
+    """
+    Invite the user to download a file from a URL.
+
+    Args:
+        url: URL to download the file from.
+        filename: Suggested filename for the downloaded file.
+    """
+    url_diag = QtWidgets.QMessageBox()
+    url_diag.setIcon(QtWidgets.QMessageBox.Information)
+    url_diag.setWindowTitle("Download required file")
+    url_diag.setTextFormat(QtCore.Qt.RichText)
+    url_diag.setText(f'The file "{filename}" must be downloaded (credentials may be required).\n\n'
+                     f'Please download it from:\n<a href="{url}">{url}</a>')
+    url_diag.setStandardButtons(QtWidgets.QMessageBox.Ok | QtWidgets.QMessageBox.Cancel)
+    ret = url_diag.exec_()
+    if ret != QtWidgets.QMessageBox.Ok:
+        app.Console.PrintMessage("Operation cancelled by user.\n")
+        return None
+
+    app_gui = gui.getMainWindow()
+    extension_suggestion = Path(filename).suffix
+    file_path_dialog = QtWidgets.QFileDialog(
+        app_gui,
+        f'Select the location of the saved file "{filename}"',
+        "",
+        f"*{extension_suggestion}",
+    )
+
+    if file_path_dialog.exec_() != QtWidgets.QFileDialog.Accepted:
+        return None
+
+    return Path(file_path_dialog.selectedFiles()[0])
 
 
 def extract_single_file_zip(
