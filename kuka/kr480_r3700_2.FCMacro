@@ -178,8 +178,7 @@ def main() -> None:
     if not step_paths:
         return
 
-    # doc = app.newDocument("KR480-R3700-2", temp=True, hidden=True)
-    doc = app.newDocument("KR480-R3700-2")
+    doc = app.newDocument("KR480-R3700-2", temp=True, hidden=True)
 
     import_options = ImportOptions(
             format="STEP",
