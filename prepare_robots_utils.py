@@ -26,12 +26,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import FreeCAD as app
-from FreeCAD import Placement, Rotation, Vector
 import FreeCADGui as gui
+import numpy as np
 import requests
 from fpo import Preference
+from FreeCAD import Matrix, Placement, Rotation, Vector
 from freecad import module_io
+from numpy.typing import ArrayLike
 from PySide import QtCore, QtWidgets  # FreeCAD's PySide!
+
+# Typing hints.
+HMatrix = ArrayLike  # A 4x4 homogeneous matrix.
 
 
 @dataclass
@@ -476,3 +481,44 @@ def write_csv(
                 f"{frame.velocity}",
             ])
 
+
+def matrix_dh(d: float, theta: float, r: float, alpha: float) -> HMatrix:
+    """
+    Return a 4x4 homogeneous matrix for Denavit-Hartenberg parameters.
+
+     Return
+     ⎡ R | T ⎤
+     ⎣ 0 | 1 ⎦
+     or, in details,:
+         ⎡ ct -st*ca  st*sa a*ct ⎤
+         | st  ct*ca -ct*sa a*st |
+         |  0     sa     ca    d |
+         ⎣  0      0      0    1 ⎦
+
+     Parameters
+     ==========
+     - d: Translation along the original z axis, in user units.
+     - theta: Rotation about the original z axis, in radians.
+              The actuation of the joint must be added to this parameter.
+     - r: Translation along the new x axis (sometimes called `a`), in user units.
+     - alpha: Rotation about the new x axis, in radians.
+
+    """
+    ct = np.cos(theta)
+    st = np.sin(theta)
+    ca = np.cos(alpha)
+    sa = np.sin(alpha)
+    return np.array([
+        [ct, -st*ca,  st*sa, r*ct],
+        [st,  ct*ca, -ct*sa, r*st],
+        [ 0,     sa,     ca,    d],
+        [ 0,      0,      0,    1],
+    ])
+
+
+def placement_dh_deg(d: float, theta_deg: float, r: float, alpha_deg: float) -> Placement:
+    """Return a FreeCAD Placement for Denavit-Hartenberg parameters (degrees)."""
+    theta_rad = np.radians(theta_deg)
+    alpha_rad = np.radians(alpha_deg)
+    dh_array = matrix_dh(d=d, theta=theta_rad, r=r, alpha=alpha_rad)
+    return Placement(Matrix(*dh_array.flatten()))
